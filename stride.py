@@ -248,7 +248,7 @@ class RSTFTStrider(Strider):
         for i in range(nblocks):
             x[i*self.hopsize:i*self.hopsize+self.blocksize] += np.fft.irfft(X[i], n=self.nfft, axis=0)[:self.blocksize] * window
 
-        return x * self.overlap / np.sum(self.window**2)
+        return x * self.hopsize / np.sum(self.window**2)
 
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
