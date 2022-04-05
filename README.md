@@ -8,7 +8,6 @@ analysis in a compact and efficient (vector based) way. By using the stride
 properties underlying numpy arrays, these tools allow creating views of
 (possibly overlapping) arrays without allocating additional memory.
 
-
 # Installation
 
 `pip install -r requirements.txt`
@@ -19,15 +18,18 @@ properties underlying numpy arrays, these tools allow creating views of
 
 # Notes
 
+* Strided arrays with overlapping elements are immutable
 * Striding is always done along the first axis of an input array
 * The first two dimensions of a strided array will always be of shape `(number of
   blocks, blocksize)`; the remaining dimensions will match the input signal
   dimensions excluding the first axis
   ```python
   x = np.ones((120, 5, 7, 2))
-  X = st.to_strided(x, 10, 10)
+  X = st.stride(x, 10, 10)
+  # Split array into 120/10 == 12 blocks of size 10
   # > X.shape[:2]
   # (12, 10)
+  # Remaining dimensions are unchanged
   # > X.shape[2:]
   # (5,7,2)
   ```
@@ -38,7 +40,7 @@ properties underlying numpy arrays, these tools allow creating views of
 ```python
 # Setup
 import numpy as np
-import strider as st
+import stride as st
 
 fs = 16000
 blocksize = 0.016
@@ -57,7 +59,7 @@ strider = st.Strider(L, K)
 ### Calculate Short-time RMS Signal Level
 ```python
 # Segment signal
-X = st.to_strided(x, L, K)
+X = st.stride(x, L, K)
 # > X.shape
 # (624, 256)
 
@@ -70,7 +72,7 @@ xdB = 10 * np.log10(np.mean(X**2, axis=1))
 ### Get Normalized Signal Segments
 
 ```python
-X = st.to_strided(x, L, K)
+X = st.stride(x, L, K)
 
 # Get local statistics
 # (Retain the singleton dimension - this will allow using broadcast operations)
@@ -78,7 +80,7 @@ mu = np.mean(X, axis=1, keepdims=True)
 std = np.std(X, axis=1, keepdims=True)
 
 # Normalize
-X_norm = np.squeeze((X - mu) / std)
+X_norm = (X - mu) / std
 ```
 
 ### Apply Frequency Domain Processing
@@ -99,5 +101,5 @@ X = strider.to_stft(x)
 Y = X
 
 # Reconstruct the time-domain signal
-y = strider.from_stft(Y)
+y = strider.istft(Y)
 ```
