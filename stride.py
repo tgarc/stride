@@ -24,7 +24,7 @@ class Strider(object):
         self.hopsize = hopsize
         self.overlap = self.blocksize - self.hopsize
 
-    def from_strided(self, blocks, dtype=None, shape=None, fill=0):
+    def istride(self, blocks, dtype=None, shape=None, fill=0):
         '''Transfrom tensor back to a non-strided version of itself
 
         Parameters
@@ -55,8 +55,8 @@ class Strider(object):
         # import pdb; pdb.set_trace()
 
         # Assume that if the dimensions have been reduced, a function was applied across the windows
-        # in which case from_strided will tile the function output to match the original input signal shape
-        # FAILCASE: STFT.from_strided when NFFT > blocksize (i.e. numpy.fft is doing the padding)
+        # in which case istride will tile the function output to match the original input signal shape
+        # FAILCASE: STFT.istride when NFFT > blocksize (i.e. numpy.fft is doing the padding)
         if blocks.ndim == 1:
             blocks = blocks.reshape((len(blocks), 1))
         elif blocks.shape[1] != self.blocksize and blocks.shape[1] != 1:
@@ -77,9 +77,9 @@ class Strider(object):
             repeating) the function output.
             Example:
               strdr = Strider(200, 100)
-              wx = strdr.to_strided(x)
+              wx = strdr.stride(x)
               wxdB = 10 * np.log10(np.mean(x**2, axis=1, keepdims=True))
-              xdB = strdr.from_strided(wxdB, shape=wx.shape)
+              xdB = strdr.istride(wxdB, shape=wx.shape)
             """
             array = np.zeros(shape, dtype=dtype)
             subarry = array[:nblocks*self.hopsize]
@@ -99,7 +99,7 @@ class Strider(object):
 
         return array
 
-    def to_strided(self, x, pad=False, **padkwargs):
+    def stride(self, x, pad=False, **padkwargs):
         '''\
         Transforms input signal into a tensor of strided (possibly overlapping) segments
 
@@ -145,18 +145,18 @@ class Strider(object):
 
         return blocks
 
-    def to_strided_index(self, x, pad=False, fs=1, **padkwargs):
-        X = self.to_strided(x, pad=pad, **padkwargs)
+    def stride_index(self, x, pad=False, fs=1, **padkwargs):
+        X = self.stride(x, pad=pad, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         return X, t
 
     def stridemap(self, func, x, pad=False, keepshape=False, keepdims=False, **padkwargs):
         if len(padkwargs) == 0:
             padkwargs = dict(mode='reflect')
-        X = self.to_strided(x, pad=pad, **padkwargs)
+        X = self.stride(x, pad=pad, **padkwargs)
         Y = func(X, axis=1, keepdims=keepshape or keepdims)
         if keepshape:
-            y = self.from_strided(Y)
+            y = self.istride(Y)
             if pad:
                 y = y[:len(x)]
         else:
@@ -174,11 +174,11 @@ class Strider(object):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize)
 
-def to_strided(x, blocksize, hopsize=None, pad=False, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).to_strided(x, pad=pad, **kwargs)
+def stride(x, blocksize, hopsize=None, pad=False, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stride(x, pad=pad, **kwargs)
 
-def to_strided_index(x, blocksize, hopsize=None, pad=False, fs=1, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).to_strided_index(x, pad=pad, fs=fs, **kwargs)
+def stride_index(x, blocksize, hopsize=None, pad=False, fs=1, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stride_index(x, pad=pad, fs=fs, **kwargs)
 
 def stridemap(func, x, blocksize, hopsize=None, pad=False, keepshape=False, keepdims=False, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stridemap(func, x, pad=pad, keepshape=keepshape, keepdims=keepdims, **kwargs)
@@ -212,25 +212,25 @@ class RSTFTStrider(Strider):
         super(RSTFTStrider, self).__init__(len(window), hopsize)
         self.window = window
 
-    def to_stft(self, x, pad=False, **kwargs):
+    def stft(self, x, pad=False, **kwargs):
         '''\
         Transform input signal into a tensor of strided (possibly overlapping) windowed 1-D DFTs
         '''
         window = self.window.reshape((1,) + self.window.shape + (1,) * len(x.shape[1:]))
-        X = self.to_strided(x, pad=pad, **kwargs) * window
+        X = self.stride(x, pad=pad, **kwargs) * window
         return np.fft.rfft(X, n=self.nfft, axis=1)
 
-    def to_stft_index(self, x, pad=False, fs=1, **kwargs):
-        X = self.to_stft(x, pad=pad, **kwargs)
+    def stft_index(self, x, pad=False, fs=1, **kwargs):
+        X = self.stft(x, pad=pad, **kwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         f = np.arange(X.shape[1]) * fs / self.nfft
         return X, t, f
 
     # def to_lfe(self, x, eps=1e-12, pad=False, **kwargs):
-    #     X = self.to_stft(x, pad=pad, **kwargs)
+    #     X = self.stft(x, pad=pad, **kwargs)
     #     return np.log(1 / self.nfft * np.abs(X)**2 + eps)
 
-    def from_stft(self, X, dtype=float, shape=None):
+    def istft(self, X, dtype=float, shape=None):
         nblocks = len(X)
         blockshape = X.shape[2:]
         window = self.window.reshape(self.window.shape + (1,) * len(blockshape))
@@ -253,8 +253,8 @@ class RSTFTStrider(Strider):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
 
-def to_stft(x, window, hopsize=None, nfft=None, pad=False, **kwargs):
-    return RSTFTStrider(window, nfft=nfft, hopsize=hopsize).to_stft(x, pad=pad, **kwargs)
+def stft(x, window, hopsize=None, nfft=None, pad=False, **kwargs):
+    return RSTFTStrider(window, nfft=nfft, hopsize=hopsize).stft(x, pad=pad, **kwargs)
 
-def to_stft_index(x, window, hopsize=None, nfft=None, pad=False, fs=1, **kwargs):
-    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).to_stft_index(x, pad=pad, fs=fs, **kwargs)
+def stft_index(x, window, hopsize=None, nfft=None, pad=False, fs=1, **kwargs):
+    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, pad=pad, fs=fs, **kwargs)
