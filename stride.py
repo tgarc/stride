@@ -24,19 +24,13 @@ class Strider(object):
         self.hopsize = hopsize
         self.overlap = self.blocksize - self.hopsize
 
-    def istride(self, blocks, dtype=None, shape=None, fill=0):
+    def istride(self, blocks):
         '''Transfrom tensor back to a non-strided version of itself
 
         Parameters
         ----------
         blocks : ndarray
             _description_
-        dtype : dtype, optional
-            _description_, by default None
-        shape : tuple, optional
-            _description_, by default None
-        fill : int, optional
-            _description_, by default 0
 
         Returns
         -------
@@ -52,23 +46,17 @@ class Strider(object):
         blockshape = blocks.shape[2:]
         #assert blocks.ndim > 1, "Blocked input should be at least 2-d"
 
-        # import pdb; pdb.set_trace()
-
         # Assume that if the dimensions have been reduced, a function was applied across the windows
         # in which case istride will tile the function output to match the original input signal shape
         # FAILCASE: STFT.istride when NFFT > blocksize (i.e. numpy.fft is doing the padding)
+        # import pdb; pdb.set_trace()
         if blocks.ndim == 1:
             blocks = blocks.reshape((len(blocks), 1))
         elif blocks.shape[1] != self.blocksize and blocks.shape[1] != 1:
             blockshape = blocks.shape[1:]
             blocks = blocks.reshape(blocks.shape[:1] + (1,) + blocks.shape[1:])
 
-        if dtype is None:
-            dtype = blocks.dtype
-        if shape is None:
-            shape = (nblocks * self.hopsize + self.overlap,) + blockshape
-        elif np.prod(shape) < np.prod((nblocks * self.hopsize + self.overlap,) + blockshape):
-            raise ValueError("shape=%s isn't large enough to hold output of shape %s" % (shape, (nblocks * self.hopsize + self.overlap,) + blockshape))
+        shape = (nblocks * self.hopsize + self.overlap,) + blockshape
 
         if blocks.shape[1] == 1:
             """
@@ -81,34 +69,36 @@ class Strider(object):
               wxdB = 10 * np.log10(np.mean(x**2, axis=1, keepdims=True))
               xdB = strdr.istride(wxdB, shape=wx.shape)
             """
-            array = np.zeros(shape, dtype=dtype)
+            array = np.zeros(shape, dtype=blocks.dtype)
             subarry = array[:nblocks*self.hopsize]
             subarry.shape = (nblocks, self.hopsize) + blockshape
             subarry[:nblocks] = blocks # broadcast assign
-            array[nblocks*self.hopsize:] = subarry[-1] # fill remainder with edge value
+            array[-self.overlap:] = subarry[-1] # fill remainder with edge value
         elif self.overlap == 0 and np.prod(shape) == blocks.size:
             # Just collapse the second dimension back into the first
             array = blocks
             array.shape = (array.shape[0]*array.shape[1],) + blockshape
         else:
             # Make a new array, copying out only the non-overlapping data
-            array = np.ones(shape, dtype=dtype)
-            array[:nblocks*self.hopsize] = blocks[:nblocks, :self.hopsize, ...].reshape((nblocks*self.hopsize,) + blockshape)
-            array[nblocks*self.hopsize:nblocks*self.hopsize+self.overlap] = blocks[nblocks-1, self.hopsize:, ...].reshape((self.overlap,) + blockshape)
-            array[nblocks*self.hopsize+self.overlap:] *= fill
+            array = np.ones(shape, dtype=blocks.dtype)
+            array[:nblocks*self.hopsize] = blocks[:nblocks, :self.hopsize].reshape((nblocks*self.hopsize,) + blockshape)
+            array[-self.overlap:] = blocks[nblocks-1, self.hopsize:].reshape((self.overlap,) + blockshape)
 
         return array
 
     def stride(self, x, pad=False, **padkwargs):
         '''\
-        Transforms input signal into a tensor of strided (possibly overlapping) segments
+        Transforms input signal into a tensor of strided (possibly overlapping)
+        segments
 
         Parameters
         ----------
         x : ndarray
             input array.
         pad : bool, optional
-            Whether to pad the input x so that no samples are dropped. The default is False. !NB! This requires a copy of the input array to be made.
+            Whether to pad the input x so that no samples are dropped. The
+            default is False. !NB! This requires a copy of the input array to be
+            made.
         padkwargs : keyword arguments, optional
             If pad is True, these kw arguments will be passed to numpy.pad.
 
@@ -180,6 +170,9 @@ def stride(x, blocksize, hopsize=None, pad=False, **kwargs):
 def stride_index(x, blocksize, hopsize=None, pad=False, fs=1, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stride_index(x, pad=pad, fs=fs, **kwargs)
 
+def istride(X, blocksize, hopsize=None):
+    return Strider(blocksize, hopsize=hopsize).stride(X)
+
 def stridemap(func, x, blocksize, hopsize=None, pad=False, keepshape=False, keepdims=False, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stridemap(func, x, pad=pad, keepshape=keepshape, keepdims=keepdims, **kwargs)
 
@@ -230,31 +223,37 @@ class RSTFTStrider(Strider):
     #     X = self.stft(x, pad=pad, **kwargs)
     #     return np.log(1 / self.nfft * np.abs(X)**2 + eps)
 
-    def istft(self, X, dtype=float, shape=None):
+    def istft(self, X):
         nblocks = len(X)
         blockshape = X.shape[2:]
         window = self.window.reshape(self.window.shape + (1,) * len(blockshape))
         #assert X.ndim > 1, "Blocked STFT input should be at least 2-d"
 
+        if (self.blocksize % self.hopsize) != 0:
+            import warnings
+            warnings.warn("There is a known scaling issue when hopsize is not a factor of blocksize")
+
         if X.ndim == 1:
             X = X.reshape((len(X), 1))
 
-        if shape is None:
-            shape = (nblocks * self.hopsize + self.overlap,) + blockshape
-        elif np.prod(shape) < np.prod((nblocks * self.hopsize + self.overlap,) + blockshape):
-            raise ValueError("shape isn't large enough to hold output")
+        shape = (nblocks * self.hopsize + self.overlap,) + blockshape
 
-        x = np.zeros(shape, dtype=dtype)
+        # TODO vectorize this
+        x = np.zeros(shape, dtype=X.real.dtype)
         for i in range(nblocks):
             x[i*self.hopsize:i*self.hopsize+self.blocksize] += np.fft.irfft(X[i], n=self.nfft, axis=0)[:self.blocksize] * window
 
+        # TODO correct scaling when (blocksize % hopsize != 0)
         return x * self.hopsize / np.sum(self.window**2)
 
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
 
 def stft(x, window, hopsize=None, nfft=None, pad=False, **kwargs):
-    return RSTFTStrider(window, nfft=nfft, hopsize=hopsize).stft(x, pad=pad, **kwargs)
+    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, pad=pad, **kwargs)
 
 def stft_index(x, window, hopsize=None, nfft=None, pad=False, fs=1, **kwargs):
     return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, pad=pad, fs=fs, **kwargs)
+
+def istft(X, window, hopsize=None, nfft=None):
+    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X)
