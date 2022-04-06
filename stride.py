@@ -30,17 +30,12 @@ class Strider(object):
         Parameters
         ----------
         blocks : ndarray
-            _description_
+            Strided input array.
 
         Returns
         -------
-        _type_
-            _description_
-
-        Raises
-        ------
-        ValueError
-            _description_
+        x : ndarray
+            Un-strided array.
         '''
         nblocks = len(blocks)
         blockshape = blocks.shape[2:]
@@ -86,7 +81,7 @@ class Strider(object):
 
         return array
 
-    def stride(self, x, pad=False, **padkwargs):
+    def stride(self, x, truncate=True, pad_mode='constant', **padkwargs):
         '''\
         Transforms input signal into a tensor of strided (possibly overlapping)
         segments
@@ -95,12 +90,12 @@ class Strider(object):
         ----------
         x : ndarray
             input array.
-        pad : bool, optional
-            Whether to pad the input x so that no samples are dropped. The
-            default is False. !NB! This requires a copy of the input array to be
-            made.
+        truncate : bool, optional
+            Truncate remainder samples from input that don't fit the strides
+            exactly. If False, the input x will be padded so that no samples are
+            dropped; !NB! This requires a copy of the input array to be made.
         padkwargs : keyword arguments, optional
-            If pad is True, these kw arguments will be passed to numpy.pad.
+            If truncate is False, these kw arguments will be passed to numpy.pad.
 
         Returns
         -------
@@ -118,13 +113,13 @@ class Strider(object):
         if nblocks < 0:
             nblocks = 0
             rem = self.blocksize*elemsize - x.size
-        if pad and rem > 0:
+        if not truncate and rem > 0:
             # import pdb;pdb.set_trace()
             padwidth = self.blocksize - (rem//elemsize)
             padshape = ((0,padwidth),) + ((0,0),)*(x.ndim-1)
 
             # pad along edge of first dimension
-            x = np.pad(x, padshape, **padkwargs)
+            x = np.pad(x, padshape, mode=pad_mode, **padkwargs)
 
             # reset strides since this is new memory
             blockstrides = x.strides
@@ -135,26 +130,24 @@ class Strider(object):
 
         return blocks
 
-    def stride_index(self, x, pad=False, fs=1, **padkwargs):
-        X = self.stride(x, pad=pad, **padkwargs)
+    def stride_index(self, x, truncate=True, pad_mode='constant', fs=1, **padkwargs):
+        X = self.stride(x, truncate=truncate, pad_mode=pad_mode, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         return X, t
 
-    def stridemap(self, func, x, pad=False, keepshape=False, keepdims=False, **padkwargs):
-        if len(padkwargs) == 0:
-            padkwargs = dict(mode='reflect')
-        X = self.stride(x, pad=pad, **padkwargs)
+    def stridemap(self, func, x, truncate=True, pad_mode='constant', keepshape=False, keepdims=False, **padkwargs):
+        X = self.stride(x, truncate=truncate, pad_mode=pad_mode, **padkwargs)
         Y = func(X, axis=1, keepdims=keepshape or keepdims)
         if keepshape:
             y = self.istride(Y)
-            if pad:
+            if not truncate:
                 y = y[:len(x)]
         else:
             y = Y
         return y
 
-    def stridemap_index(self, func, x, pad=False, keepshape=False, keepdims=False, fs=1, **padkwargs):
-        y = self.stridemap(func, x, pad=pad, keepshape=keepshape, keepdims=keepdims, **padkwargs)
+    def stridemap_index(self, func, x, truncate=True, pad_mode='constant', keepshape=False, keepdims=False, fs=1, **padkwargs):
+        y = self.stridemap(func, x, truncate=truncate, pad_mode=pad_mode, keepshape=keepshape, keepdims=keepdims, fs=fs, **padkwargs)
         if keepshape:
             t = np.arange(y.shape[0]) / fs
         else:
@@ -164,20 +157,20 @@ class Strider(object):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize)
 
-def stride(x, blocksize, hopsize=None, pad=False, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stride(x, pad=pad, **kwargs)
+def stride(x, blocksize, hopsize=None, truncate=True, pad_mode='constant', **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stride(x, truncate=truncate, pad_mode=pad_mode, **kwargs)
 
-def stride_index(x, blocksize, hopsize=None, pad=False, fs=1, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stride_index(x, pad=pad, fs=fs, **kwargs)
+def stride_index(x, blocksize, hopsize=None, truncate=True, pad_mode='constant', fs=1, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stride_index(x, truncate=truncate, pad_mode=pad_mode, fs=fs, **kwargs)
 
 def istride(X, blocksize, hopsize=None):
     return Strider(blocksize, hopsize=hopsize).stride(X)
 
-def stridemap(func, x, blocksize, hopsize=None, pad=False, keepshape=False, keepdims=False, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stridemap(func, x, pad=pad, keepshape=keepshape, keepdims=keepdims, **kwargs)
+def stridemap(func, x, blocksize, hopsize=None, truncate=True, pad_mode='constant', keepshape=False, keepdims=False, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stridemap(func, x, truncate=truncate, pad_mode=pad_mode, keepshape=keepshape, keepdims=keepdims, **kwargs)
 
-def stridemap_index(func, x, blocksize, hopsize=None, pad=False, keepshape=False, keepdims=False, fs=1, **kwargs):
-        return Strider(blocksize, hopsize=hopsize).stridemap_index(func, x, pad=pad, keepshape=keepshape, keepdims=keepdims, fs=fs, **kwargs)
+def stridemap_index(func, x, blocksize, hopsize=None, truncate=True, pad_mode='constant', keepshape=False, keepdims=False, fs=1, **kwargs):
+        return Strider(blocksize, hopsize=hopsize).stridemap_index(func, x, truncate=truncate, pad_mode=pad_mode, keepshape=keepshape, keepdims=keepdims, fs=fs, **kwargs)
 
 class RSTFTStrider(Strider):
 
@@ -205,23 +198,19 @@ class RSTFTStrider(Strider):
         super(RSTFTStrider, self).__init__(len(window), hopsize)
         self.window = window
 
-    def stft(self, x, pad=False, **kwargs):
+    def stft(self, x, truncate=True, pad_mode='constant', **padkwargs):
         '''\
         Transform input signal into a tensor of strided (possibly overlapping) windowed 1-D DFTs
         '''
         window = self.window.reshape((1,) + self.window.shape + (1,) * len(x.shape[1:]))
-        X = self.stride(x, pad=pad, **kwargs) * window
+        X = self.stride(x, truncate=truncate, pad_mode=pad_mode, **padkwargs) * window
         return np.fft.rfft(X, n=self.nfft, axis=1)
 
-    def stft_index(self, x, pad=False, fs=1, **kwargs):
-        X = self.stft(x, pad=pad, **kwargs)
+    def stft_index(self, x, truncate=True, pad_mode='constant', fs=1, **padkwargs):
+        X = self.stft(x, truncate=truncate, pad_mode=pad_mode, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         f = np.arange(X.shape[1]) * fs / self.nfft
         return X, t, f
-
-    # def to_lfe(self, x, eps=1e-12, pad=False, **kwargs):
-    #     X = self.stft(x, pad=pad, **kwargs)
-    #     return np.log(1 / self.nfft * np.abs(X)**2 + eps)
 
     def istft(self, X):
         nblocks = len(X)
@@ -249,11 +238,11 @@ class RSTFTStrider(Strider):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
 
-def stft(x, window, hopsize=None, nfft=None, pad=False, **kwargs):
-    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, pad=pad, **kwargs)
+def stft(x, window, hopsize=None, nfft=None, truncate=True, pad_mode='constant', **kwargs):
+    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, truncate=truncate, pad_mode=pad_mode, **kwargs)
 
-def stft_index(x, window, hopsize=None, nfft=None, pad=False, fs=1, **kwargs):
-    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, pad=pad, fs=fs, **kwargs)
+def stft_index(x, window, hopsize=None, nfft=None, truncate=True, pad_mode='constant', fs=1,  **kwargs):
+    return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, truncate=truncate, pad_mode=pad_mode, fs=fs, **kwargs)
 
 def istft(X, window, hopsize=None, nfft=None):
     return RSTFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X)
