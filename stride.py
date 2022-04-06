@@ -218,10 +218,6 @@ class RSTFTStrider(Strider):
         window = self.window.reshape(self.window.shape + (1,) * len(blockshape))
         #assert X.ndim > 1, "Blocked STFT input should be at least 2-d"
 
-        if (self.blocksize % self.hopsize) != 0:
-            import warnings
-            warnings.warn("There is a known scaling issue when hopsize is not a factor of blocksize")
-
         if X.ndim == 1:
             X = X.reshape((len(X), 1))
 
@@ -229,11 +225,15 @@ class RSTFTStrider(Strider):
 
         # TODO vectorize this
         x = np.zeros(shape, dtype=X.real.dtype)
+        n = np.zeros(shape, dtype=X.real.dtype)
+        w2 = window**2
+        iX = np.fft.irfft(X, n=self.nfft, axis=1)[:, :self.blocksize] * window
         for i in range(nblocks):
-            x[i*self.hopsize:i*self.hopsize+self.blocksize] += np.fft.irfft(X[i], n=self.nfft, axis=0)[:self.blocksize] * window
+            x[i*self.hopsize:i*self.hopsize+self.blocksize] += iX[i]
+            n[i*self.hopsize:i*self.hopsize+self.blocksize] += w2
 
-        # TODO correct scaling when (blocksize % hopsize != 0)
-        return x * self.hopsize / np.sum(self.window**2)
+        x[n != 0] /= n[n != 0]
+        return x
 
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
