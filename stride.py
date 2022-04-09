@@ -71,15 +71,9 @@ class Strider(object):
             subarry.shape = (nblocks, self.hopsize) + blockshape
             subarry[:nblocks] = blocks # broadcast assign
             array[-self.overlap:] = subarry[-1] # fill remainder with edge value
-        elif self.overlap == 0 and np.prod(shape) == blocks.size:
-            # Just collapse the second dimension back into the first
-            array = blocks
-            array.shape = (array.shape[0]*array.shape[1],) + blockshape
         else:
-            # Make a new array, copying out only the non-overlapping data
-            array = np.zeros(shape, dtype=blocks.dtype)
-            array[:nblocks*self.hopsize] = blocks[:nblocks, :self.hopsize].reshape((nblocks*self.hopsize,) + blockshape)
-            array[-self.overlap:] = blocks[nblocks-1, self.hopsize:].reshape((self.overlap,) + blockshape)
+            strides = (blocks.strides[0]*self.hopsize,) + blocks.strides[2:]
+            array = _as_strided(blocks, shape=shape, strides=strides)
 
         if center:
             array = array[self.overlap:-self.overlap]
@@ -112,8 +106,6 @@ class Strider(object):
             Strided array.
 
         '''
-        writeable = (self.overlap == 0) # Only allow writing for non-overlapping strides
-
         blockshape = x.shape[1:]
         blockstrides = x.strides
         elemsize = int(np.prod(blockshape)) or 1
@@ -139,7 +131,7 @@ class Strider(object):
             # reset strides since this is new memory
             blockstrides = x.strides
 
-        blocks = _as_strided(x, shape=(nblocks, self.blocksize) + blockshape, strides=(self.hopsize*blockstrides[0],) + blockstrides, writeable=writeable)
+        blocks = _as_strided(x, shape=(nblocks, self.blocksize) + blockshape, strides=(self.hopsize*blockstrides[0],) + blockstrides)
 
         return blocks
 
@@ -177,7 +169,7 @@ def stride_index(x, blocksize, hopsize=None, truncate=True, center=False, pad_mo
     return Strider(blocksize, hopsize=hopsize).stride_index(x, truncate=truncate, center=center, pad_mode=pad_mode, fs=fs, **kwargs)
 
 def istride(X, blocksize, hopsize=None, center=True):
-    return Strider(blocksize, hopsize=hopsize).stride(X, center=False)
+    return Strider(blocksize, hopsize=hopsize).istride(X, center=False)
 
 def stridemap(func, x, blocksize, hopsize=None, truncate=True, center=False, pad_mode='constant', keepshape=False, keepdims=False, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stridemap(func, x, truncate=truncate, center=center, pad_mode=pad_mode, keepshape=keepshape, keepdims=keepdims, **kwargs)
