@@ -33,6 +33,8 @@ class Strider(object):
         ----------
         blocks : ndarray
             Strided input array.
+        center : bool, optional
+            Trim `blocksize - hopsize` samples from the beginning and end of the signal.
 
         Returns
         -------
@@ -72,7 +74,7 @@ class Strider(object):
             subarry[:nblocks] = blocks # broadcast assign
             array[-self.overlap:] = subarry[-1] # fill remainder with edge value
         else:
-            strides = (blocks.strides[0]*self.hopsize,) + blocks.strides[2:]
+            strides = blocks.strides[1:]
             array = _as_strided(blocks, shape=shape, strides=strides)
 
         if center:
@@ -279,7 +281,7 @@ def stft(x, window, hopsize=None, nfft=None, truncate=True, center=False, onesid
     return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, truncate=truncate, center=center, onesided=onesided, **kwargs)
 
 def stft_index(x, window, hopsize=None, nfft=None, truncate=True, center=False, onesided=None, fs=1,  **kwargs):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, truncate=truncate, center=center,onesided=onesided, fs=fs, **kwargs)
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, truncate=truncate, center=center, onesided=onesided, fs=fs, **kwargs)
 
 def istft(X, window, hopsize=None, nfft=None, center=False):
     return STFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X, center=center)
