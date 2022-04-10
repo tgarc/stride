@@ -18,7 +18,6 @@ properties underlying numpy arrays, these tools allow creating views of
 
 # Notes
 
-* Strided arrays with overlapping elements are immutable
 * Striding is always done along the first axis of an input array
 * The first two dimensions of a strided array will always be of shape `(number of
   blocks, blocksize)`; the remaining dimensions will match the input signal
@@ -91,9 +90,9 @@ nfft = max(512, 1 << (int(np.ceil(np.log2(L)))))
 # Define the tapering window
 w = np.hamming(L+1)[1:]
 
-strider = st.RSTFTStrider(w, K, nfft)
+strider = st.STFTStrider(w, K, nfft)
 # > strider
-# RSTFTStrider(blocksize=256, hopsize=128, nfft=512)
+# STFTStrider(blocksize=256, hopsize=128, nfft=512)
 
 X = strider.to_stft(x)
 
