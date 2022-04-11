@@ -2,7 +2,6 @@ import numpy as np
 from numpy.lib.stride_tricks import as_strided as _as_strided
 
 
-# Assumes blocks are split into evenly divided parts
 # Accepts multi-dimensional input, but 1-d and 2-d are the only ones tested
 class Strider(object):
 
@@ -34,7 +33,8 @@ class Strider(object):
         blocks : ndarray
             Strided input array.
         center : bool, optional
-            Trim `blocksize - hopsize` samples from the beginning and end of the signal.
+            Trim `blocksize - hopsize` samples from the beginning and end of the
+            signal. (use if center=True was used when calling `stride`).
 
         Returns
         -------
@@ -43,12 +43,11 @@ class Strider(object):
         '''
         nblocks = len(blocks)
         blockshape = blocks.shape[2:]
-        #assert blocks.ndim > 1, "Blocked input should be at least 2-d"
 
-        # Assume that if the dimensions have been reduced, a function was applied across the windows
-        # in which case istride will tile the function output to match the original input signal shape
-        # FAILCASE: STFT.istride when NFFT > blocksize (i.e. numpy.fft is doing the padding)
-        # import pdb; pdb.set_trace()
+        # Assume that if the dimensions have been reduced, a function was
+        # applied across the windows in which case istride will tile the
+        # function output to match the original input signal shape
+        # !NB! This function fails for STFT where nfft > blocksize
         if blocks.ndim == 1:
             blocks = blocks.reshape((len(blocks), 1))
         elif blocks.shape[1] != self.blocksize and blocks.shape[1] != 1:
@@ -66,13 +65,13 @@ class Strider(object):
               strdr = Strider(200, 100)
               wx = strdr.stride(x)
               wxdB = 10 * np.log10(np.mean(x**2, axis=1, keepdims=True))
-              xdB = strdr.istride(wxdB, shape=wx.shape)
+              xdB = strdr.istride(wxdB)
             """
-            array = np.zeros(shape, dtype=blocks.dtype)
+            array = np.zeros_like(blocks, shape=shape)
             subarry = array[:nblocks*self.hopsize]
             subarry.shape = (nblocks, self.hopsize) + blockshape
             subarry[:nblocks] = blocks # broadcast assign
-            array[-self.overlap:] = subarry[-1] # fill remainder with edge value
+            array[-self.overlap:] = subarry[-1]
         else:
             strides = blocks.strides[1:]
             array = _as_strided(blocks, shape=shape, strides=strides)
@@ -168,8 +167,8 @@ def stride(x, blocksize, hopsize=None, truncate=True, center=False, **kwargs):
 def stride_index(x, blocksize, hopsize=None, truncate=True, center=False, fs=1, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stride_index(x, truncate=truncate, center=center, fs=fs, **kwargs)
 
-def istride(X, blocksize, hopsize=None, center=True):
-    return Strider(blocksize, hopsize=hopsize).istride(X, center=False)
+def istride(X, blocksize, hopsize=None, center=False):
+    return Strider(blocksize, hopsize=hopsize).istride(X, center=center)
 
 def stridemap(func, x, blocksize, hopsize=None, truncate=True, center=False, keepshape=False, keepdims=False, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stridemap(func, x, truncate=truncate, center=center, keepshape=keepshape, keepdims=keepdims, **kwargs)
@@ -204,43 +203,68 @@ class STFTStrider(Strider):
         super(STFTStrider, self).__init__(blocksize, hopsize)
         self.window = window
 
-    def stft(self, x, truncate=True, center=False, onesided=None, **padkwargs):
+    def stft(self, x, norm=None, truncate=True, center=False, zerophase=False, **padkwargs):
         '''\
         Transform input signal into a tensor of strided (possibly overlapping) windowed 1-D DFTs
         '''
+        # if not fftshift in (None, 'onesided', 'twosided', 'centered'):
+        #     raise ValueError("Invalid value for fftshift '%s'" % fftshift)
+
         window = self.window.reshape((1,) + self.window.shape + (1,) * len(x.shape[1:]))
 
+        iscomplex = np.iscomplexobj(x)
+        if iscomplex:
+            fft = np.fft.fft
+        else:
+            fft = np.fft.rfft
+
         X = self.stride(x, truncate=truncate, center=center, **padkwargs) * window
+
+        # # center the spectrum around f=0
+        # if iscomplex and fftshift == 'centered':
+        #     X *= np.exp(1j*np.pi*np.arange(self.blocksize))
 
         if self.nfft > self.blocksize:
             padshape = [*((0,0),) * X.ndim]
             padshape[1] = (0, self.nfft - self.blocksize)
             X = np.pad(X, padshape, **padkwargs)
 
-        iscomplex = np.iscomplexobj(x)
-        if onesided and iscomplex:
-            raise ValueError("(onesided=True); Can't take a one-sided fft of a complex input")
-        elif onesided == False or iscomplex:
-            fft = np.fft.fft
-        else:
-            fft = np.fft.rfft
+        if zerophase:
+            mod = self.blocksize % 2
+            X = np.roll(X, -(self.blocksize-mod)//2, axis=1)
 
-        X = fft(X, n=self.nfft, axis=1)
+        X = fft(X, n=self.nfft, axis=1, norm=norm)
+
+        # if iscomplex and fftshift == 'onesided':
+        #     mod = self.nfft % 2
+        #     X[(self.nfft+mod)//2:] += X[(self.nfft-mod)//2::-1]
+        #     X = X[:(self.nfft+mod)//2 + 1]
 
         return X
 
-    def stft_index(self, x, truncate=True, center=False, onesided=None, fs=1, **padkwargs):
-        X = self.stft(x, truncate=truncate, center=center, onesided=onesided, **padkwargs)
+    def stft_index(self, x, norm=None, truncate=True, center=False, zerophase=False, fs=1, **padkwargs):
+        X = self.stft(x, norm=norm, truncate=truncate, center=center, zerophase=zerophase, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         f = np.arange(X.shape[1]) * fs / self.nfft
+
+        # iscomplex = X.shape[1] == self.nfft
+        # if iscomplex:
+        #     if fftshift == 'centered':
+        #         # center the spectrum around f=0
+        #         f -= fs/2
+        #     elif fftshift == 'onesided':
+        #         f = f[(self.nfft+mod)//2:]
+        #     elif fftshift == 'twosided' or fftshift is None:
+        #         mod = self.nfft % 2
+        #         f[(self.nfft+mod)//2:] = -f[(self.nfft-mod)//2::-1]
+
         return X, t, f
 
-    def istft(self, X, center=False):
+    def istft(self, X, norm=None, center=False, zerophase=False):
         nblocks = len(X)
         blockshape = X.shape[2:]
 
         window = self.window.reshape(self.window.shape + (1,) * len(blockshape))
-        assert X.ndim > 1, "STFT input should be at least 2-d"
 
         if X.ndim == 1:
             X = X.reshape((len(X), 1))
@@ -257,8 +281,15 @@ class STFTStrider(Strider):
             assert False, "Unexpected DFT length"
 
         # Compute per block ifft
-        iX = ifft(X, n=self.nfft, axis=1)
+        iX = ifft(X, n=self.nfft, axis=1, norm=norm)
+        if zerophase:
+            mod = self.blocksize % 2
+            iX = np.roll(iX, (self.blocksize-mod)//2, axis=1)
         iX = iX[:, :self.blocksize] * window
+
+        # # Un-center spectrum
+        # if X.shape[1] == self.nfft and fftshift == 'centered':
+        #     iX *= np.exp(-1j*np.pi*np.arange(self.blocksize))
 
         # TODO vectorize this
         w2 = window**2
@@ -277,11 +308,11 @@ class STFTStrider(Strider):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
 
-def stft(x, window, hopsize=None, nfft=None, truncate=True, center=False, onesided=None, **kwargs):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, truncate=truncate, center=center, onesided=onesided, **kwargs)
+def stft(x, window, hopsize=None, nfft=None, norm=None, truncate=True, center=False, zerophase=False, **kwargs):
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, norm=norm, truncate=truncate, center=center, zerophase=zerophase, **kwargs)
 
-def stft_index(x, window, hopsize=None, nfft=None, truncate=True, center=False, onesided=None, fs=1,  **kwargs):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, truncate=truncate, center=center, onesided=onesided, fs=fs, **kwargs)
+def stft_index(x, window, hopsize=None, nfft=None, norm=None, truncate=True, center=False, zerophase=False, fs=1,  **kwargs):
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, norm=norm, truncate=truncate, center=center, zerophase=zerophase, fs=fs, **kwargs)
 
-def istft(X, window, hopsize=None, nfft=None, center=False):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X, center=center)
+def istft(X, window, hopsize=None, nfft=None, norm=None, center=False, zerophase=False):
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X, norm=norm, center=center, zerophase=zerophase)
