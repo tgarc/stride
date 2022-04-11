@@ -94,7 +94,7 @@ strider = st.STFTStrider(w, K, nfft)
 # > strider
 # STFTStrider(blocksize=256, hopsize=128, nfft=512)
 
-X = strider.to_stft(x)
+X = strider.stft(x)
 
 # Apply processing on X ...
 Y = X
