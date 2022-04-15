@@ -25,16 +25,17 @@ class Strider(object):
         self.hopsize = hopsize
         self.overlap = self.blocksize - self.hopsize
 
-    def istride(self, blocks, center=False):
+    def istride(self, blocks, edgepadded=False):
         '''Transfrom tensor back to a non-strided version of itself
 
         Parameters
         ----------
         blocks : ndarray
             Strided input array.
-        center : bool, optional
-            Trim `blocksize - hopsize` samples from the beginning and end of the
-            signal. (use if center=True was used when calling `stride`).
+        edgepadded : bool, optional
+            If True, trim `blocksize - hopsize` samples from the beginning and
+            end of the signal. (use if edgepadded=True was used when calling
+            `stride`).
 
         Returns
         -------
@@ -76,28 +77,30 @@ class Strider(object):
             strides = blocks.strides[1:]
             array = _as_strided(blocks, shape=shape, strides=strides)
 
-        if center:
+        if edgepadded:
             array = array[self.overlap:-self.overlap]
 
         return array
 
-    def stride(self, x, truncate=True, center=False, **padkwargs):
-        '''\
-        Transforms input signal into a tensor of strided (possibly overlapping)
-        segments
+    def stride(self, x, truncate=None, edgepadded=False, **padkwargs):
+        '''Transforms input signal into a tensor of strided (possibly
+        overlapping) segments
 
         Parameters
         ----------
         x : ndarray
             input array.
-        truncate : bool, optional
+        truncate : bool or None, optional
             Truncate remainder samples from input that don't fit the strides
-            exactly. If False, the input x will be padded so that no samples are
-            dropped; !NB! This requires a copy of the input array to be made.
-        center : bool, optional
-            Add `blocksize - hopsize` samples to the beginning and end of the signal.
+            exactly. If `False`, the input x will be padded so that no samples
+            are dropped. If `None`, `truncate` will follow the value of
+            `edgepadded`.
+        edgepadded : bool, optional
+            Add `blocksize - hopsize` samples to the beginning and end of the
+            signal.
         padkwargs : keyword arguments, optional
-            If truncate is False or center is True, these kw arguments will be passed to numpy.pad.
+            If `truncate` is False or `center` is True, these kw arguments will
+            be passed to `numpy.pad`.
 
         Returns
         -------
@@ -109,6 +112,9 @@ class Strider(object):
         blockstrides = x.strides
         elemsize = int(np.prod(blockshape)) or 1
 
+        if truncate is None:
+            truncate = edgepadded
+
         nblocks, rem = divmod(x.size - self.overlap*elemsize, self.hopsize*elemsize)
         if nblocks < 0:
             nblocks = 0
@@ -119,7 +125,7 @@ class Strider(object):
             padshape[0] = (0, self.blocksize - (rem//elemsize))
             nblocks += 1
 
-        if center:
+        if edgepadded:
             p0, p1 = padshape[0]
             padshape[0] = (p0+self.overlap, p1+self.overlap)
             nblocks += 2
@@ -134,24 +140,24 @@ class Strider(object):
 
         return blocks
 
-    def stride_index(self, x, truncate=True, center=False, fs=1, **padkwargs):
-        X = self.stride(x, truncate=truncate, center=center, **padkwargs)
+    def stride_index(self, x, truncate=None, edgepadded=False, fs=1, **padkwargs):
+        X = self.stride(x, truncate=truncate, edgepadded=edgepadded, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         return X, t
 
-    def stridemap(self, func, x, truncate=True, center=False, keepshape=False, keepdims=False, **padkwargs):
-        X = self.stride(x, truncate=truncate, center=center, **padkwargs)
-        Y = func(X, axis=1, keepdims=keepshape or keepdims)
-        if keepshape:
-            y = self.istride(Y, center=center)
+    def stridemap(self, ufunc, x, truncate=None, edgepadded=False, keepshape=False, keepdims=False, **padkwargs):
+        X = self.stride(x, truncate=truncate, edgepadded=edgepadded, **padkwargs)
+        Y = ufunc(X, axis=1, keepdims=keepshape or keepdims)
+        if keepshape and X.shape[1] != Y.shape[1]:
+            y = self.istride(Y, edgepadded=edgepadded)
             if not truncate:
                 y = y[:len(x)]
         else:
             y = Y
         return y
 
-    def stridemap_index(self, func, x, truncate=True, center=False, keepshape=False, keepdims=False, fs=1, **padkwargs):
-        y = self.stridemap(func, x, truncate=truncate, center=center, keepshape=keepshape, keepdims=keepdims, fs=fs, **padkwargs)
+    def stridemap_index(self, ufunc, x, truncate=None, edgepadded=False, keepshape=False, keepdims=False, fs=1, **padkwargs):
+        y = self.stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepshape=keepshape, keepdims=keepdims, fs=fs, **padkwargs)
         if keepshape:
             t = np.arange(y.shape[0]) / fs
         else:
@@ -161,20 +167,20 @@ class Strider(object):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize)
 
-def stride(x, blocksize, hopsize=None, truncate=True, center=False, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stride(x, truncate=truncate, center=center, **kwargs)
+def stride(x, blocksize, hopsize=None, truncate=None, edgepadded=False, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stride(x, truncate=truncate, edgepadded=edgepadded, **kwargs)
 
-def stride_index(x, blocksize, hopsize=None, truncate=True, center=False, fs=1, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stride_index(x, truncate=truncate, center=center, fs=fs, **kwargs)
+def stride_index(x, blocksize, hopsize=None, truncate=None, edgepadded=False, fs=1, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stride_index(x, truncate=truncate, edgepadded=edgepadded, fs=fs, **kwargs)
 
-def istride(X, blocksize, hopsize=None, center=False):
-    return Strider(blocksize, hopsize=hopsize).istride(X, center=center)
+def istride(X, blocksize, hopsize=None, edgepadded=False):
+    return Strider(blocksize, hopsize=hopsize).istride(X, edgepadded=edgepadded)
 
-def stridemap(func, x, blocksize, hopsize=None, truncate=True, center=False, keepshape=False, keepdims=False, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stridemap(func, x, truncate=truncate, center=center, keepshape=keepshape, keepdims=keepdims, **kwargs)
+def stridemap(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepshape=False, keepdims=False, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepshape=keepshape, keepdims=keepdims, **kwargs)
 
-def stridemap_index(func, x, blocksize, hopsize=None, truncate=True, center=False, keepshape=False, keepdims=False, fs=1, **kwargs):
-        return Strider(blocksize, hopsize=hopsize).stridemap_index(func, x, truncate=truncate, center=center, keepshape=keepshape, keepdims=keepdims, fs=fs, **kwargs)
+def stridemap_index(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepshape=False, keepdims=False, fs=1, **kwargs):
+        return Strider(blocksize, hopsize=hopsize).stridemap_index(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepshape=keepshape, keepdims=keepdims, fs=fs, **kwargs)
 
 class STFTStrider(Strider):
 
@@ -184,12 +190,14 @@ class STFTStrider(Strider):
         Parameters
         ----------
         window : ndarray or scalar
-            (ndarray) Pre-fft window to apply
-            (scalar) Number of sample points to use per FFT. In this case no windowing will be applied before FFT.
+            (ndarray)   Pre-fft window to apply
+            (scalar)    Number of sample points to use per FFT. In this case no
+                        windowing will be applied before FFT.
         hopsize : int, optional
             Number of samples to skip between windows
         nfft : int, optional
-            FFT size (should be >= window size to avoid truncation). The default sets the FFT size equal to the window size.
+            FFT size (should be >= window size to avoid truncation). The default
+            sets the FFT size equal to the window size.
 
         Returns
         -------
@@ -203,13 +211,20 @@ class STFTStrider(Strider):
         super(STFTStrider, self).__init__(blocksize, hopsize)
         self.window = window
 
-    def stft(self, x, norm=None, truncate=True, center=False, zerophase=False, **padkwargs):
-        '''\
-        Transform input signal into a tensor of strided (possibly overlapping) windowed 1-D DFTs
-        '''
-        # if not fftshift in (None, 'onesided', 'twosided', 'centered'):
-        #     raise ValueError("Invalid value for fftshift '%s'" % fftshift)
+    def stft(self, x, truncate=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None, **padkwargs):
+        '''Transform input signal into a tensor of strided (possibly
+        overlapping) windowed 1-D DFTs
 
+        Parameters
+        ----------
+        centeredfft : bool, optional
+            Center the spectrum.
+        zerophase : bool, optional
+            Remove phase skew.
+        norm : -
+            Which FFT normalization factor to apply. See `np.fft.fft`
+            documentation.
+        '''
         window = self.window.reshape((1,) + self.window.shape + (1,) * len(x.shape[1:]))
 
         iscomplex = np.iscomplexobj(x)
@@ -218,11 +233,13 @@ class STFTStrider(Strider):
         else:
             fft = np.fft.rfft
 
-        X = self.stride(x, truncate=truncate, center=center, **padkwargs) * window
+        X = self.stride(x, truncate=truncate, edgepadded=edgepadded, **padkwargs) * window
 
-        # # center the spectrum around f=0
-        # if iscomplex and fftshift == 'centered':
-        #     X *= np.exp(1j*np.pi*np.arange(self.blocksize))
+        # center the spectrum around f=0
+        if iscomplex and centeredfft:
+            X *= np.exp(1j*np.pi*np.arange(self.blocksize))
+        # elif centeredfft:
+        #     warnings.warn("centeredfft=True is only valid when input is complex")
 
         if self.nfft > self.blocksize:
             padshape = [*((0,0),) * X.ndim]
@@ -235,32 +252,33 @@ class STFTStrider(Strider):
 
         X = fft(X, n=self.nfft, axis=1, norm=norm)
 
-        # if iscomplex and fftshift == 'onesided':
-        #     mod = self.nfft % 2
-        #     X[(self.nfft+mod)//2:] += X[(self.nfft-mod)//2::-1]
-        #     X = X[:(self.nfft+mod)//2 + 1]
-
         return X
 
-    def stft_index(self, x, norm=None, truncate=True, center=False, zerophase=False, fs=1, **padkwargs):
-        X = self.stft(x, norm=norm, truncate=truncate, center=center, zerophase=zerophase, **padkwargs)
+    def stft_index(self, x, truncate=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None, fs=1, **padkwargs):
+        X = self.stft(x, truncate=truncate, edgepadded=edgepadded, centeredfft=centeredfft, zerophase=zerophase, norm=norm, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         f = np.arange(X.shape[1]) * fs / self.nfft
 
-        # iscomplex = X.shape[1] == self.nfft
-        # if iscomplex:
-        #     if fftshift == 'centered':
-        #         # center the spectrum around f=0
-        #         f -= fs/2
-        #     elif fftshift == 'onesided':
-        #         f = f[(self.nfft+mod)//2:]
-        #     elif fftshift == 'twosided' or fftshift is None:
-        #         mod = self.nfft % 2
-        #         f[(self.nfft+mod)//2:] = -f[(self.nfft-mod)//2::-1]
+        if X.shape[1] == self.nfft:
+            if centeredfft:
+                # center the spectrum around f=0
+                f -= fs/2
+            else:
+                mod = self.nfft % 2
+                f[self.nfft//2+1-mod:] = -f[self.nfft//2-1+mod:0:-1]
 
         return X, t, f
 
-    def istft(self, X, norm=None, center=False, zerophase=False):
+    def istft(self, X, edgepadded=False, centeredfft=False, zerophase=False, norm=None):
+        '''Invert stft transform.
+
+        Parameters
+        ----------
+        centeredfft : bool, optional
+            Set `true` if the input is a centered spectrum stft.
+        zerophase : bool, optional
+            Set `true` if the input is a zero phase stft transform.
+        '''
         nblocks = len(X)
         blockshape = X.shape[2:]
 
@@ -271,14 +289,15 @@ class STFTStrider(Strider):
 
         shape = (nblocks * self.hopsize + self.overlap,) + blockshape
 
-        if X.shape[1] == self.nfft//2+1:
-            ifft = np.fft.irfft
-            dtype = X.real.dtype
-        elif X.shape[1] == self.nfft:
+        iscomplex = X.shape[1] == self.nfft
+        if iscomplex:
             ifft = np.fft.ifft
             dtype = X.dtype
+        elif X.shape[1] == self.nfft//2+1:
+            ifft = np.fft.irfft
+            dtype = X.real.dtype
         else:
-            assert False, "Unexpected DFT length"
+            raise ValueError("Unexpected DFT length")
 
         # Compute per block ifft
         iX = ifft(X, n=self.nfft, axis=1, norm=norm)
@@ -287,9 +306,9 @@ class STFTStrider(Strider):
             iX = np.roll(iX, (self.blocksize-mod)//2, axis=1)
         iX = iX[:, :self.blocksize] * window
 
-        # # Un-center spectrum
-        # if X.shape[1] == self.nfft and fftshift == 'centered':
-        #     iX *= np.exp(-1j*np.pi*np.arange(self.blocksize))
+        # Un-center spectrum
+        if iscomplex and centeredfft:
+            iX *= np.exp(-1j*np.pi*np.arange(self.blocksize))
 
         # TODO vectorize this
         w2 = window**2
@@ -300,7 +319,7 @@ class STFTStrider(Strider):
             n[i*self.hopsize:i*self.hopsize+self.blocksize] += w2
         x[n != 0] /= n[n != 0]
 
-        if center:
+        if edgepadded:
             x = x[self.overlap:-self.overlap]
 
         return x
@@ -308,11 +327,11 @@ class STFTStrider(Strider):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft)
 
-def stft(x, window, hopsize=None, nfft=None, norm=None, truncate=True, center=False, zerophase=False, **kwargs):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, norm=norm, truncate=truncate, center=center, zerophase=zerophase, **kwargs)
+def stft(x, window, hopsize=None, nfft=None, truncate=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None, **kwargs):
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft(x, truncate=truncate, edgepadded=edgepadded, centeredfft=centeredfft, zerophase=zerophase, norm=norm, **kwargs)
 
-def stft_index(x, window, hopsize=None, nfft=None, norm=None, truncate=True, center=False, zerophase=False, fs=1,  **kwargs):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, norm=norm, truncate=truncate, center=center, zerophase=zerophase, fs=fs, **kwargs)
+def stft_index(x, window, hopsize=None, nfft=None, truncate=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None, fs=1, **kwargs):
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).stft_index(x, truncate=truncate, edgepadded=edgepadded, centeredfft=centeredfft, zerophase=zerophase, norm=norm, fs=fs, **kwargs)
 
-def istft(X, window, hopsize=None, nfft=None, norm=None, center=False, zerophase=False):
-    return STFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X, norm=norm, center=center, zerophase=zerophase)
+def istft(X, window, hopsize=None, nfft=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None):
+    return STFTStrider(window, hopsize=hopsize, nfft=nfft).istft(X, edgepadded=edgepadded, centeredfft=centeredfft, zerophase=zerophase, norm=norm)
