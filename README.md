@@ -57,15 +57,8 @@ strider = st.Strider(L, K)
 ```
 ### Calculate Short-time RMS Signal Level
 ```python
-# Segment signal
-X = st.stride(x, L, K)
-# > X.shape
-# (624, 256)
-
 # Apply rms metric over windows (windows are always along axis=1)
-xdB = 10 * np.log10(np.mean(X**2, axis=1))
-# > xdB.shape
-# (624,)
+xdB = 10 * np.log10( st.stride(x**2, L, K).mean(axis=1) )
 ```
 
 ### Get Normalized Signal Segments
@@ -73,10 +66,13 @@ xdB = 10 * np.log10(np.mean(X**2, axis=1))
 ```python
 X = st.stride(x, L, K)
 
+# Apply funcs along strided axis (axis=1)
+# Retain the singleton dimension - this will allow using broadcast operations
+kwargs = dict(axis=1, keepdims=True)
+
 # Get local statistics
-# (Retain the singleton dimension - this will allow using broadcast operations)
-mu = np.mean(X, axis=1, keepdims=True)
-std = np.std(X, axis=1, keepdims=True)
+mu = X.mean(**kwargs)
+std = X.std(**kwargs)
 
 # Normalize
 X_norm = (X - mu) / std
@@ -92,7 +88,7 @@ w = np.hamming(L+1)[1:]
 
 strider = st.STFTStrider(w, K, nfft)
 # > strider
-# STFTStrider(blocksize=256, hopsize=128, nfft=512)
+# STFTStrider(blocksize=256, hopsize=128, nfft=512, centeredfft=False, zerophase=False, norm=None)
 
 X = strider.stft(x)
 
