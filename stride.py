@@ -145,23 +145,13 @@ class Strider(object):
         t = np.arange(X.shape[0]) * self.hopsize / fs
         return X, t
 
-    def stridemap(self, ufunc, x, truncate=None, edgepadded=False, keepshape=False, keepdims=False, **padkwargs):
+    def stridemap(self, ufunc, x, truncate=None, edgepadded=False, keepdims=False, **padkwargs):
         X = self.stride(x, truncate=truncate, edgepadded=edgepadded, **padkwargs)
-        Y = ufunc(X, axis=1, keepdims=keepshape or keepdims)
-        if keepshape and X.shape[1] != Y.shape[1]:
-            y = self.istride(Y, edgepadded=edgepadded)
-            if not truncate:
-                y = y[:len(x)]
-        else:
-            y = Y
-        return y
+        return ufunc(X, axis=1, keepdims=keepdims)
 
-    def stridemap_index(self, ufunc, x, truncate=None, edgepadded=False, keepshape=False, keepdims=False, fs=1, **padkwargs):
-        y = self.stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepshape=keepshape, keepdims=keepdims, fs=fs, **padkwargs)
-        if keepshape:
-            t = np.arange(y.shape[0]) / fs
-        else:
-            t = np.arange(y.shape[0]) * self.hopsize / fs
+    def stridemap_index(self, ufunc, x, truncate=None, edgepadded=False, keepdims=False, fs=1, **padkwargs):
+        y = self.stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, fs=fs, **padkwargs)
+        t = np.arange(y.shape[0]) * self.hopsize / fs
         return y, t
 
     def __repr__(self):
@@ -176,11 +166,11 @@ def stride_index(x, blocksize, hopsize=None, truncate=None, edgepadded=False, fs
 def istride(X, blocksize, hopsize=None, edgepadded=False):
     return Strider(blocksize, hopsize=hopsize).istride(X, edgepadded=edgepadded)
 
-def stridemap(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepshape=False, keepdims=False, **kwargs):
-    return Strider(blocksize, hopsize=hopsize).stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepshape=keepshape, keepdims=keepdims, **kwargs)
+def stridemap(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepdims=False, **kwargs):
+    return Strider(blocksize, hopsize=hopsize).stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, **kwargs)
 
-def stridemap_index(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepshape=False, keepdims=False, fs=1, **kwargs):
-        return Strider(blocksize, hopsize=hopsize).stridemap_index(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepshape=keepshape, keepdims=keepdims, fs=fs, **kwargs)
+def stridemap_index(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepdims=False, fs=1, **kwargs):
+        return Strider(blocksize, hopsize=hopsize).stridemap_index(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, fs=fs, **kwargs)
 
 class STFTStrider(Strider):
 
@@ -317,7 +307,8 @@ class STFTStrider(Strider):
         for i in range(nblocks):
             x[i*self.hopsize:i*self.hopsize+self.blocksize] += iX[i]
             n[i*self.hopsize:i*self.hopsize+self.blocksize] += w2
-        x[n != 0] /= n[n != 0]
+        mask = n != 0
+        x[mask] /= n[mask]
 
         if edgepadded:
             x = x[self.overlap:-self.overlap]
