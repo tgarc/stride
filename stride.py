@@ -93,14 +93,14 @@ class Strider(object):
         truncate : bool or None, optional
             Truncate remainder samples from input that don't fit the strides
             exactly. If `False`, the input x will be padded so that no samples
-            are dropped. If `None`, `truncate` will follow the value of
-            `edgepadded`.
+            are dropped. If `None`, `truncate` will be set to the logical
+            inverse of `edgepadded`.
         edgepadded : bool, optional
             Add `blocksize - hopsize` samples to the beginning and end of the
             signal.
         padkwargs : keyword arguments, optional
-            If `truncate` is False or `edgepadded` is True, these kw arguments will
-            be passed to `numpy.pad`.
+            If `truncate` is False or `edgepadded` is True, these kw arguments
+            will be passed to `numpy.pad`.
 
         Returns
         -------
@@ -113,7 +113,7 @@ class Strider(object):
         elemsize = int(np.prod(blockshape)) or 1
 
         if truncate is None:
-            truncate = edgepadded
+            truncate = not edgepadded
 
         nblocks, rem = divmod(x.size - self.overlap*elemsize, self.hopsize*elemsize)
         if nblocks < 0:
@@ -286,7 +286,7 @@ class STFTStrider(Strider):
         edgepadded : bool, optional
             If True, trim `blocksize - hopsize` samples from the beginning and
             end of the signal. (use if edgepadded=True was used when calling
-            `stride`).
+            `stft`).
         '''
         nblocks = len(X)
         blockshape = X.shape[2:]
