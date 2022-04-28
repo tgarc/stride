@@ -20,7 +20,8 @@ class Strider(object):
         if hopsize is None:
             hopsize = blocksize
         else:
-            assert hopsize > 0, "hopsize must be a positive number"
+            assert 0 < hopsize <= blocksize, "hopsize must be a positive integer between 0 and blocksize"
+
         self.blocksize = blocksize
         self.hopsize = hopsize
         self.overlap = self.blocksize - self.hopsize
@@ -72,7 +73,7 @@ class Strider(object):
             subarry = array[:nblocks*self.hopsize]
             subarry.shape = (nblocks, self.hopsize) + blockshape
             subarry[:nblocks] = blocks # broadcast assign
-            array[-self.overlap:] = subarry[-1]
+            array[-self.overlap:] = blocks[-1]
         else:
             strides = blocks.strides[1:]
             array = _as_strided(blocks, shape=shape, strides=strides)
@@ -82,7 +83,7 @@ class Strider(object):
 
         return array
 
-    def stride(self, x, truncate=None, edgepadded=False, **padkwargs):
+    def stride(self, x, truncate=True, edgepadded=False, **padkwargs):
         '''Transforms input signal into a tensor of strided (possibly
         overlapping) segments
 
@@ -90,14 +91,14 @@ class Strider(object):
         ----------
         x : ndarray
             input array.
-        truncate : bool or None, optional
+        truncate : bool, optional
             Truncate remainder samples from input that don't fit the strides
-            exactly. If `False`, the input x will be padded so that no samples
-            are dropped. If `None`, `truncate` will be set to the logical
-            inverse of `edgepadded`.
+            exactly. If `False`, the input array will be padded so that no
+            samples are dropped.
         edgepadded : bool, optional
             Add `blocksize - hopsize` samples to the beginning and end of the
-            signal.
+            input array. Additional padding may be added to the right edge of
+            the array to avoid dropping samples.
         padkwargs : keyword arguments, optional
             If `truncate` is False or `edgepadded` is True, these kw arguments
             will be passed to `numpy.pad`.
@@ -111,36 +112,44 @@ class Strider(object):
         blockshape = x.shape[1:]
         blockstrides = x.strides
         elemsize = int(np.prod(blockshape)) or 1
+        n = x.size // elemsize
 
-        if truncate is None:
-            truncate = not edgepadded
-
-        nblocks, rem = divmod(x.size - self.overlap*elemsize, self.hopsize*elemsize)
+        nblocks, rem = divmod(n - self.overlap, self.hopsize)
         if nblocks < 0:
             nblocks = 0
-            rem = self.blocksize*elemsize - x.size
+            rem = self.blocksize - n
 
         padshape = [*((0,0),)*x.ndim]
         if not truncate and rem > 0:
-            padshape[0] = (0, self.blocksize - (rem//elemsize))
+            padshape[0] = (0, self.blocksize - rem)
             nblocks += 1
 
         if edgepadded:
             p0, p1 = padshape[0]
-            padshape[0] = (p0+self.overlap, p1+self.overlap)
-            nblocks += 2
+            lpad = p0 + self.overlap
+            rpad = p1
 
+            nblocks, rem = divmod(n + lpad + rpad, self.hopsize)
+            if rem > 0:
+                rpad += self.blocksize - rem
+                nblocks += 1
+            else:
+                rpad += self.overlap
+            padshape[0] = (lpad, rpad)
+
+        # print(nblocks*self.hopsize + self.overlap)
         if np.any(padshape):
             x = np.pad(x, padshape, **padkwargs)
 
             # reset strides since this is new memory
             blockstrides = x.strides
+        # print(x.size//elemsize)
 
         blocks = _as_strided(x, shape=(nblocks, self.blocksize) + blockshape, strides=(self.hopsize*blockstrides[0],) + blockstrides)
 
         return blocks
 
-    def stride_index(self, x, truncate=None, edgepadded=False, fs=1, **padkwargs):
+    def stride_index(self, x, truncate=True, edgepadded=False, fs=1, **padkwargs):
         X = self.stride(x, truncate=truncate, edgepadded=edgepadded, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         return X, t
@@ -150,11 +159,11 @@ class Strider(object):
         t = np.arange(x.shape[0]) / fs
         return x, t
 
-    def stridemap(self, ufunc, x, truncate=None, edgepadded=False, keepdims=False, **padkwargs):
+    def stridemap(self, ufunc, x, truncate=True, edgepadded=False, keepdims=False, **padkwargs):
         X = self.stride(x, truncate=truncate, edgepadded=edgepadded, **padkwargs)
         return ufunc(X, axis=1, keepdims=keepdims)
 
-    def stridemap_index(self, ufunc, x, truncate=None, edgepadded=False, keepdims=False, fs=1, **padkwargs):
+    def stridemap_index(self, ufunc, x, truncate=True, edgepadded=False, keepdims=False, fs=1, **padkwargs):
         y = self.stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, fs=fs, **padkwargs)
         t = np.arange(y.shape[0]) * self.hopsize / fs
         return y, t
@@ -162,10 +171,10 @@ class Strider(object):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d)" % (self.__class__.__name__, self.blocksize, self.hopsize)
 
-def stride(x, blocksize, hopsize=None, truncate=None, edgepadded=False, **kwargs):
+def stride(x, blocksize, hopsize=None, truncate=True, edgepadded=False, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stride(x, truncate=truncate, edgepadded=edgepadded, **kwargs)
 
-def stride_index(x, blocksize, hopsize=None, truncate=None, edgepadded=False, fs=1, **kwargs):
+def stride_index(x, blocksize, hopsize=None, truncate=True, edgepadded=False, fs=1, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stride_index(x, truncate=truncate, edgepadded=edgepadded, fs=fs, **kwargs)
 
 def istride(X, blocksize, hopsize=None, edgepadded=False):
@@ -174,10 +183,10 @@ def istride(X, blocksize, hopsize=None, edgepadded=False):
 def istride_index(blocks, blocksize, hopsize=None, edgepadded=False):
     return Strider(blocksize, hopsize=hopsize).istride_index(blocks, edgepadded=edgepadded)
 
-def stridemap(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepdims=False, **kwargs):
+def stridemap(ufunc, x, blocksize, hopsize=None, truncate=True, edgepadded=False, keepdims=False, **kwargs):
     return Strider(blocksize, hopsize=hopsize).stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, **kwargs)
 
-def stridemap_index(ufunc, x, blocksize, hopsize=None, truncate=None, edgepadded=False, keepdims=False, fs=1, **kwargs):
+def stridemap_index(ufunc, x, blocksize, hopsize=None, truncate=True, edgepadded=False, keepdims=False, fs=1, **kwargs):
         return Strider(blocksize, hopsize=hopsize).stridemap_index(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, fs=fs, **kwargs)
 
 class STFTStrider(Strider):
@@ -219,7 +228,7 @@ class STFTStrider(Strider):
         self.zerophase = zerophase
         self.norm = norm
 
-    def stft(self, x, truncate=None, edgepadded=False, **padkwargs):
+    def stft(self, x, truncate=True, edgepadded=False, **padkwargs):
         '''Transform input signal into a tensor of strided (possibly
         overlapping) windowed 1-D DFTs
 
@@ -263,7 +272,7 @@ class STFTStrider(Strider):
 
         return X
 
-    def stft_index(self, x, truncate=None, edgepadded=False, fs=1, **padkwargs):
+    def stft_index(self, x, truncate=True, edgepadded=False, fs=1, **padkwargs):
         X = self.stft(x, truncate=truncate, edgepadded=edgepadded, **padkwargs)
         t = np.arange(X.shape[0]) * self.hopsize / fs
         f = np.arange(X.shape[1]) * fs / self.nfft
@@ -337,10 +346,10 @@ class STFTStrider(Strider):
     def __repr__(self):
         return "%s(blocksize=%d, hopsize=%d, nfft=%d, centeredfft=%s, zerophase=%s, norm=%s)" % (self.__class__.__name__, self.blocksize, self.hopsize, self.nfft, self.centeredfft, self.zerophase, self.norm)
 
-def stft(x, window, hopsize=None, nfft=None, truncate=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None, **kwargs):
+def stft(x, window, hopsize=None, nfft=None, truncate=True, edgepadded=False, centeredfft=False, zerophase=False, norm=None, **kwargs):
     return STFTStrider(window, hopsize=hopsize, nfft=nfft, centeredfft=centeredfft, zerophase=zerophase, norm=norm).stft(x, truncate=truncate, edgepadded=edgepadded, **kwargs)
 
-def stft_index(x, window, hopsize=None, nfft=None, truncate=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None, fs=1, **kwargs):
+def stft_index(x, window, hopsize=None, nfft=None, truncate=True, edgepadded=False, centeredfft=False, zerophase=False, norm=None, fs=1, **kwargs):
     return STFTStrider(window, hopsize=hopsize, nfft=nfft, centeredfft=centeredfft, zerophase=zerophase, norm=norm).stft_index(x, truncate=truncate, edgepadded=edgepadded, fs=fs, **kwargs)
 
 def istft(X, window, hopsize=None, nfft=None, edgepadded=False, centeredfft=False, zerophase=False, norm=None):
