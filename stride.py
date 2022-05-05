@@ -237,11 +237,12 @@ class STFTStrider(Strider):
         truncate : bool or None, optional
             Truncate remainder samples from input that don't fit the strides
             exactly. If `False`, the input x will be padded so that no samples
-            are dropped. If `None`, `truncate` will follow the value of
-            `edgepadded`.
+            are dropped.
         edgepadded : bool, optional
             Add `blocksize - hopsize` samples to the beginning and end of the
-            signal.
+            signal. Adding this padding makes it possible to perfectly
+            reconstruct the input at the edges of the signal (assuming other
+            requisite conditions are met).
         '''
         window = self.window.reshape((1,) + self.window.shape + (1,) * len(x.shape[1:]))
 
