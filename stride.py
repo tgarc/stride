@@ -187,7 +187,7 @@ def stridemap(ufunc, x, blocksize, hopsize=None, truncate=True, edgepadded=False
     return Strider(blocksize, hopsize=hopsize).stridemap(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, **kwargs)
 
 def stridemap_index(ufunc, x, blocksize, hopsize=None, truncate=True, edgepadded=False, keepdims=False, fs=1, **kwargs):
-        return Strider(blocksize, hopsize=hopsize).stridemap_index(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, fs=fs, **kwargs)
+    return Strider(blocksize, hopsize=hopsize).stridemap_index(ufunc, x, truncate=truncate, edgepadded=edgepadded, keepdims=keepdims, fs=fs, **kwargs)
 
 class STFTStrider(Strider):
 
